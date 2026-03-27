@@ -123,6 +123,16 @@ Create a workspace directory:
 .agent-team/<YYYY-MM-DD>-<task-slug>/
 ```
 
+Also create:
+- `.agent-team/<YYYY-MM-DD>-<task-slug>/inbox/` — subdirectory for inter-agent inbox messages
+- `SESSION.md` in the workspace — initialize with header row only:
+
+```markdown
+# Session: <task-slug>
+| Agent | Status | Spawned By | Timestamp |
+|---|---|---|---|
+```
+
 Write `TASK.md` to the workspace:
 ```markdown
 # Task: <Title>
@@ -199,48 +209,57 @@ Only after BRIEF.md status is confirmed → spawn Architect. Pass BRIEF.md as th
 
 ## Step 5 — Route and execute
 
-Use the routing table below. Spawn agents sequentially or in parallel per the execution plan.
-Pass the workspace path and relevant input files to each agent.
+The orchestrator **only directly spawns the first tier of agents** (Researcher, Designer, Scaler-cost-audit as applicable). After that, agents self-chain per the peer mesh protocol in TEAM-CONFIG.md — each agent spawns its natural downstream when complete. The orchestrator monitors SESSION.md to track progress and re-engages only if a blocker is surfaced or the cycle limit is hit.
+
+### How to spawn the first tier
+
+Spawn the first tier agent(s) from the routing table below. Each spawn prompt must include one of:
+
+- **Solo agent**: `"You are running solo. Per the peer mesh protocol in TEAM-CONFIG.md, spawn [next natural downstream agent] when your work is complete."`
+- **Parallel agents**: `"You are running in parallel with [sibling agent names]. Return your result when done — do not spawn downstream. Your parent (the orchestrator) will coordinate the next tier after all parallel agents complete."`
+
+After spawning parallel Tier 1 agents, wait for all to complete, then spawn the next tier (e.g. Architect) with the combined outputs.
 
 ### Routing Table
+*(Orchestrator directly spawns only the FIRST agent(s) in each chain. Subsequent agents self-chain per TEAM-CONFIG.md peer mesh protocol.)*
 
-| Task type | Agents | Order |
+| Task type | Orchestrator spawns | Full chain (agents self-chain after first) |
 |---|---|---|
-| New full-stack feature | Researcher → Architect → [Backend + Mobile/Frontend in parallel] → QA → [Security + Scaler in parallel] | Sequential phases |
-| Backend-only feature | Researcher → Architect → Backend → QA → [Security + Scaler in parallel] | Sequential |
-| New Lambda endpoint | Researcher → Architect → Backend → Infra → QA → [Security + Scaler in parallel] | Sequential (Infra reads Backend's IMPLEMENTATION.md for handler path) |
-| Mobile-only feature | [Researcher + Designer in parallel] → Mobile → QA → Security | Phases |
-| Frontend-only feature | [Researcher + Designer in parallel] → Frontend → QA → Security | Phases |
-| New screen / UI change | Designer → [Mobile or Frontend] → QA | Sequential |
-| API + mobile change | Researcher → Architect → [Backend + Mobile in parallel] → Infra → QA → [Security + Scaler in parallel] | Sequential phases |
-| Infrastructure change | Scaler (cost audit) → Architect → Infra → QA → [Security + Scaler (scale) in parallel] | Sequential |
-| Bug fix (simple) | Backend or Mobile or Frontend or Firmware → QA | Direct to engineer |
-| Bug fix (unknown cause) | Researcher → relevant engineer → QA | Sequential |
-| Research / investigation | Researcher only | Single agent |
-| Design only | Designer only | Single agent |
-| Refactor | Researcher → Architect → relevant engineer(s) → QA | Sequential |
-| Security audit (broad) | Security (standalone, full system sweep) | Single agent, iterative |
-| Security audit (targeted) | Security → relevant engineer(s) → Security (re-test) | Sequential, iterative |
-| Threat model | Researcher → Security | Sequential |
-| Pen test / vulnerability review | Security → [Backend + Infra in parallel for fixes] → Security (re-test) → QA | Sequential phases |
-| Consistency audit (broad) | Auditor (standalone, full codebase sweep) | Single agent, iterative |
-| Consistency audit (targeted) | Auditor → relevant engineer(s) (fix inconsistencies) → Auditor (re-check) | Sequential |
-| Post-refactor pattern capture | Auditor (standalone) | Single agent |
-| Hardware design / schematic change | Hardware → (Hardware review of cross-refs) | Single agent, iterative; flag H/W–S/W interface to Security if relevant |
-| Hardware + software interface change | Hardware → Backend (daemon side) → Hardware (verify sync) → QA | Sequential; Security if auth/device comms affected |
-| ML pipeline — training config | ML → QA | Sequential |
-| ML pipeline — model deploy / compile | Researcher → ML → QA | Sequential |
-| ML pipeline — new infrastructure | Architect → [ML + Infra in parallel] → QA → Security | Phases |
-| ESP32 firmware — bug fix | Firmware → QA | Direct |
-| ESP32 firmware — feature | Researcher → Firmware → QA | Sequential; flag UART changes to Backend for daemon sync |
-| ESP32 + daemon UART protocol change | Firmware → Backend → QA | Sequential (Firmware defines format; Backend updates parser) |
-| Analytics / aggregation | Researcher → Backend → QA | Sequential |
-| Data migration / backfill script | Backend → Security (verify scoping) → QA | Sequential |
+| New full-stack feature | Researcher (solo → Prompt Coach → Architect) | Architect → [Backend + Mobile/Frontend parallel] → QA → [Security + Scaler parallel] |
+| Backend-only feature | Researcher (solo → Prompt Coach → Architect) | Architect → Backend → QA → [Security + Scaler parallel] |
+| New Lambda endpoint | Researcher (solo → Prompt Coach → Architect) | Architect → Backend → Infra → QA → [Security + Scaler parallel] |
+| Mobile-only feature | [Researcher + Designer in parallel] | orchestrator spawns Architect after both complete → Mobile → QA → Security |
+| Frontend-only feature | [Researcher + Designer in parallel] | orchestrator spawns Architect after both complete → Frontend → QA → Security |
+| New screen / UI change | Designer (solo → returns to orchestrator) | orchestrator spawns Mobile or Frontend → QA |
+| API + mobile change | Researcher (solo → Prompt Coach → Architect) | Architect → [Backend + Mobile parallel] → Infra → QA → [Security + Scaler parallel] |
+| Infrastructure change | Scaler cost audit (solo → returns to orchestrator) | orchestrator spawns Architect → Infra → QA → [Security + Scaler parallel] |
+| Bug fix (simple) | Backend, Mobile, Frontend, or Firmware (solo → QA) | QA → Security if applicable |
+| Bug fix (unknown cause) | Researcher (solo → relevant engineer) | engineer → QA |
+| Research / investigation | Researcher only | Single agent, returns to orchestrator |
+| Design only | Designer only | Single agent, returns to orchestrator |
+| Refactor | Researcher (solo → Prompt Coach → Architect) | Architect → relevant engineer(s) → QA |
+| Security audit (broad) | Security (standalone) | Single agent, iterative |
+| Security audit (targeted) | Security (solo → relevant engineer(s)) | engineer(s) → Security re-test |
+| Threat model | Researcher (solo → Security) | Security returns to orchestrator |
+| Pen test / vulnerability review | Security (solo → [Backend + Infra parallel for fixes]) | Security re-test → QA |
+| Consistency audit (broad) | Auditor (standalone) | Single agent, returns to orchestrator |
+| Consistency audit (targeted) | Auditor (solo → relevant engineer(s)) | engineer(s) → Auditor re-check |
+| Post-refactor pattern capture | Auditor (standalone) | Single agent, returns to orchestrator |
+| Hardware design / schematic change | Hardware (solo, iterative) | Returns to orchestrator |
+| Hardware + software interface change | Hardware (solo → Backend daemon side) | Backend → Hardware verify sync → QA |
+| ML pipeline — training config | ML (solo → QA) | QA → Security if applicable |
+| ML pipeline — model deploy / RKNN | Researcher (solo → ML) | ML → QA |
+| ML pipeline — new infrastructure | Architect (solo → [ML + Infra parallel]) | QA → Security |
+| ESP32 firmware — bug fix | Firmware (solo → QA) | QA returns to orchestrator |
+| ESP32 firmware — feature | Researcher (solo → Firmware) | Firmware → QA |
+| ESP32 + daemon UART protocol change | Firmware (solo → Backend) | Backend → QA |
+| Analytics / aggregation | Researcher (solo → Backend) | Backend → QA |
+| Data migration / backfill script | Backend (solo → Security scoping) | Security → QA |
 
 **Skip Researcher when:** the task is a single-file fix with no external dependencies, the engineer already has all context needed from TASK.md + ARCHITECTURE.md, or the codebase pattern to follow is obvious. REQUIRE Researcher when: (1) the task touches an external API or library not already used in the codebase, (2) it involves a package upgrade, or (3) the scope is ambiguous.
 **Skip Architect when:** it's a bug fix in a single file, a copy/text change, or a trivial addition with no design decisions (no new API surface, no schema change, no new auth path).
 **Include Designer when:** a new navigation screen is added, a new multi-step flow is introduced, or a new modal/sheet with 3+ states is added. Skip Designer for: label changes, color tweaks, or adding a single field to an existing form.
-**Always include QA when:** production code is written or changed (Lambda, device daemon Python, firmware C++, mobile, frontend).
+**Always include QA when:** production code is written or changed (Lambda, daemon Python, firmware C++, mobile, frontend).
 **Include Security when:** the task touches auth, JWT/API key handling, IAM roles, external API integration, device communication, IAP verification, or any new public-facing endpoint. Security runs AFTER QA, spawns Black Hat internally, and may send findings back to engineers for another fix → re-test loop.
 **Security-early rule:** When the task scope (from BRIEF.md or TASK.md) explicitly includes auth, JWT, or IAM design, Security also reviews `ARCHITECTURE.md` **before implementation begins** — a lightweight architectural security check only (not a full audit). This catches auth design flaws before they are coded. Route becomes: `Architect → Security (arch review) → Backend → QA → Security (full review)`.
 **Include Scaler when:** any new DynamoDB table, query, or access pattern is introduced; any new API endpoint is added; any new data pipeline or batch job is created; or when the user asks about scale/load/cost. Scaler runs in two modes:
@@ -259,31 +278,26 @@ When spawning an agent, provide:
 3. What to produce (their output file)
 4. Any task-specific constraints from CLAUDE.md
 5. The `model` parameter from the Model Selection table in TASK.md
+6. Whether the agent is running solo (and what to spawn next) or in parallel (return result to parent)
 
-Example prompt to a backend agent (standard task):
+Example prompt to a backend agent (solo — spawns QA when done):
 ```
 Workspace: .agent-team/2026-03-25-athlete-profile/
 Read: TASK.md, ARCHITECTURE.md
 Produce: IMPLEMENTATION.md + production code
 Constraint: This project requires Prettier before commit. Run test:web after.
 Model: sonnet
+You are running solo. Per the peer mesh protocol in TEAM-CONFIG.md, spawn team-qa when your work is complete.
 ```
 
-Example prompt to a backend agent (single-file config change):
-```
-Workspace: .agent-team/2026-03-26-update-timeout/
-Read: TASK.md
-Produce: IMPLEMENTATION.md + code change
-Model: haiku
-```
-
-Example prompt to a backend agent (auth rewrite):
+Example prompt to a backend agent (parallel — returns result):
 ```
 Workspace: .agent-team/2026-03-26-auth-overhaul/
 Read: TASK.md, ARCHITECTURE.md
 Produce: IMPLEMENTATION.md + production code
 Constraint: Prettier required. Run test:web + test:cdk after.
 Model: opus
+You are running in parallel with team-mobile. Return your result when done — do not spawn downstream. Your parent will coordinate QA after all parallel agents complete.
 ```
 
 **Note for Architect:** When BRIEF.md exists in the workspace (i.e. Researcher + Prompt Coach ran), the Architect's prompt should be:
@@ -292,9 +306,12 @@ Workspace: .agent-team/<date>-<slug>/
 Read: BRIEF.md, RESEARCH.md  ← BRIEF.md is the primary brief; TASK.md is secondary context
 Produce: ARCHITECTURE.md
 Model: opus
+You are running solo. Per the peer mesh protocol in TEAM-CONFIG.md, spawn engineer agents per the scope in TASK.md when your architecture is complete.
 ```
 
 ## Step 5 — Monitor and adapt
+
+Monitor SESSION.md to track which agents have started and completed. Agents append rows as they start (IN_PROGRESS) and complete (COMPLETE). If no SESSION.md update appears for an agent within ~5 minutes of being spawned, check whether it returned a result or is stuck.
 
 - If an agent's output reveals new information that changes the plan (e.g. RESEARCH.md shows the approach in TASK.md won't work), update TASK.md and adjust downstream agents.
 - If an agent flags a blocker, surface it to the user immediately — don't proceed past a blocker.
@@ -413,10 +430,10 @@ HIGH security findings, WARNING scale issues — not blocking today but will cau
 ...
 
 ### 4. <Issue Title> [WARNING · Scale]
-**What**: DynamoDB table has no TTL — unbounded growth. Hits cost cliff at scale.
+**What**: DynamoDB `justendit-sessions` has no TTL — unbounded growth. Hits cost cliff at ~10K users/day.
 **Where**: `infra/cdk/lib/api-stack.ts` (Table construct, no `timeToLiveAttribute`)
 **Fix**: Add `timeToLiveAttribute: 'expires_at'` to the Table construct. Add TTL write in the Lambda.
-**Verify**: Check `aws dynamodb describe-time-to-live --table-name <table>`
+**Verify**: Check `aws dynamodb describe-time-to-live --table-name justendit-sessions`
 
 ## Track and Fix Opportunistically
 MEDIUM security findings, LOW QA issues, ADVISORY scale issues — no urgency, but log and address in normal flow.
@@ -439,6 +456,24 @@ INFO/LOW findings, passed checks worth documenting, advisory scale notes beyond 
 - If a fix has a deployment dependency (CDK deploy, env var update), note it inline
 
 Then report the summary to the user. If ACTION-LIST.md was written, lead with it — that's what they need to act on. SUMMARY.md is the reference document.
+
+## Step 7 — Retro
+
+After `SUMMARY.md` and `ACTION-LIST.md` are written, trigger the optimizer in retro mode.
+
+Spawn `team-optimizer` with:
+- Workspace: `.agent-team/<date>-<slug>/`
+- `mode: retro`
+- Read: `SESSION.md`, `SUMMARY.md`, `ACTION-LIST.md` (if exists), all agent output files
+- Produce: `RETRO-REPORT.md` + direct edits to agent files in `~/.claude/agents/`
+
+Run the retro **in parallel with reporting the ACTION-LIST to the user** — the retro is background work that doesn't block the user from seeing results.
+
+When the retro completes, append to your final report to the user:
+> "Retro complete — [N] agent files updated. See RETRO-REPORT.md for details."
+
+If the retro produces no updates (no misses, no patterns), simply note:
+> "Retro complete — no agent file updates needed this session."
 
 ## Rules
 

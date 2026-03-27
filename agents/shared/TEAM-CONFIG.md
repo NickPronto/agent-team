@@ -4,12 +4,13 @@ Global standards for the development team. Every agent reads this file on startu
 
 ## Protocol
 
-1. Read this file on startup
-2. Read `~/.claude/agents/shared/solutions.md` — **skip any approach listed as a failed approach before trying it**
-3. Read the project's `CLAUDE.md` (overrides these globals)
-4. Load only the referenced files relevant to your task — don't load everything
-5. Write all task output to the workspace directory provided by the orchestrator
-6. Never re-ask for context already in these files
+1. **Read your inbox**: check `.agent-team/<slug>/inbox/team-<name>.md` — if it exists, read it and incorporate any peer messages as additional context before starting your primary work.
+2. Read this file on startup
+3. Read `~/.claude/agents/shared/solutions.md` — **skip any approach listed as a failed approach before trying it**
+4. Read the project's `CLAUDE.md` (overrides these globals)
+5. Load only the referenced files relevant to your task — don't load everything
+6. Write all task output to the workspace directory provided by the orchestrator
+7. Never re-ask for context already in these files
 
 ## Error Reporting (Required)
 
@@ -49,6 +50,102 @@ When you notice you wasted steps — loaded a file you never used, ran the same 
 - Be honest — self-reporting inefficiency is how the whole team gets faster
 - The Optimizer reads these and applies targeted edits to agent files when a pattern is confirmed
 
+## Peer Mesh Protocol
+
+Agents operate as a delegating mesh — each agent spawns its natural downstream directly rather than returning to the orchestrator for every handoff. This section defines the three coordination mechanisms all agents use.
+
+### Three Mechanisms
+
+**1. Delegating spawns** — Every agent has the `Agent` tool. When your work is complete, spawn your natural downstream agent directly. Results bubble back up the call chain. Use this when you need the downstream result before the parent can continue, or when it's the natural next step in the workflow.
+
+**2. Inbox protocol** — Any agent can write a non-blocking message to any peer's inbox at `.agent-team/<slug>/inbox/team-<name>.md`. Every agent reads its inbox at startup before doing its primary work. Use this when you notice something outside your domain that a peer would want to know about before they start — without blocking your own work.
+
+**3. SESSION.md** — Agents append their status to `SESSION.md` in the workspace. Used to track what's done and prevent duplicate work in parallel scenarios.
+
+### Tier Structure (spawn direction)
+
+Agents may only spawn agents in the same tier or downstream (lower tier number = upstream). Agents may write inbox messages to any tier.
+
+```
+Tier 0: Orchestrator       (session start + final synthesis only)
+Tier 1: Researcher, Designer, Scaler (cost audit)
+Tier 2: Architect, Prompt Coach
+Tier 3: Engineers — Backend, Infra, Mobile, Frontend, Firmware, ML, Hardware
+Tier 4: QA, Optimizer
+Tier 5: Security, Scaler (scale validation), Auditor
+```
+
+### Spawn vs Inbox Decision Rule
+
+| Situation | Mechanism |
+|---|---|
+| Agent needs result before continuing | Spawn (blocking) |
+| Natural next step in workflow | Spawn |
+| Agent notices something outside its domain | Inbox (non-blocking) |
+| Loop would be created by spawning | Inbox only |
+| Parallel agents completing same tier | Return result to parent; parent coordinates downstream |
+
+### Parallel Coordination Rule
+
+When an orchestrator or agent spawns multiple agents in parallel (e.g. Backend + Frontend), those parallel agents DO NOT each spawn QA. They return their results to the spawning agent, which coordinates the next tier after all parallel agents complete. The spawn prompt will tell you: "You are running in parallel. Return your result when done — your parent will coordinate downstream."
+
+### SESSION.md Format
+
+```markdown
+# Session: <task-slug>
+| Agent | Status | Spawned By | Timestamp |
+|---|---|---|---|
+| team-researcher | COMPLETE | orchestrator | 14:00 |
+| team-architect | IN_PROGRESS | team-researcher | 14:18 |
+```
+
+**On start**: append a row with `IN_PROGRESS` and the current time from `` `date '+%H:%M'` ``.
+**On complete**: append a completion row with `COMPLETE` and current time.
+
+Example bash command to get current time: `date '+%H:%M'`
+
+### Inbox Message Format
+
+```markdown
+## [team-<sender> → team-<recipient>] <timestamp>
+**Re**: <brief subject>
+**Note**: <observation — what you noticed and why it might matter to the recipient>
+**Blocking you**: No — context for your review pass.
+```
+
+Write inbox messages **before you spawn downstream agents**, so peers receive context before they start.
+
+### Stretch Zone Principle
+
+During your work, you may notice concerns that fall outside your primary domain. Use judgment: if a peer would want to know about it before they start their work, write to their inbox.
+
+Examples of good stretch:
+- Backend notices a manual auth check that looks wrong → writes to Security inbox
+- Architect spots a design that will be hard to test → writes to QA inbox
+- QA finds an architectural gap during testing → writes to Architect inbox
+- Infra notices an IAM policy that's overly permissive → writes to Security inbox
+- Backend notices a DynamoDB access pattern that will hot-partition at scale → writes to Scaler inbox
+
+**Do not implement work outside your domain. Notice, flag, and let the relevant specialist handle it.**
+
+## Retro Protocol
+
+After every task, the orchestrator spawns `team-optimizer` in retro mode. The optimizer:
+1. Spawns each participating agent in retro mode (they self-reflect, don't implement)
+2. Synthesizes cross-agent patterns
+3. Applies concrete edits directly to agent `.md` files
+4. Writes `RETRO-REPORT.md` to the workspace
+
+**Agents in retro mode** write `retro-team-<name>.md` to the workspace. They reflect on: misses, process waste, inbox/stretch zone gaps, and what they'd do differently.
+
+**The optimizer applies learnings immediately** — agent files are updated before the next task runs. This is the primary mechanism by which the team improves over time.
+
+**Workspace files added by retro:**
+| File | Written by | Contains |
+|---|---|---|
+| `retro-team-<name>.md` | Each agent (retro mode) | Self-reflection and suggested file edits |
+| `RETRO-REPORT.md` | Optimizer (retro mode) | Synthesis, updates applied, cross-agent patterns |
+
 ## Primary Stack
 
 | Layer | Technology |
@@ -85,6 +182,8 @@ The orchestrator creates a workspace at `.agent-team/<date>-<slug>/` for each ta
 | `ACTION-LIST.md` | Orchestrator | Prioritized fix list across ALL reports — ordered by urgency, with file:line and exact fix per item. Only written when findings exist. This is the primary user-facing output. |
 | `EVALS-REPORT.md` | Optimizer | Eval tasks harvested from this session (optional — only written when Eval Candidates found) |
 | `AUDIT-REPORT.md` | Auditor | Inconsistencies found, canonical patterns extracted, agent files updated |
+| `retro-team-<name>.md` | Each agent (retro mode) | Self-reflection on misses, process waste, and suggested agent file edits |
+| `RETRO-REPORT.md` | Optimizer (retro mode) | Synthesis of all agent retros, cross-agent patterns, updates applied to agent files |
 
 ## Handoff Convention (Required for IMPLEMENTATION.md)
 
